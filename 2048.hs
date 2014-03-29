@@ -1,4 +1,4 @@
-{-# OPTIONS_GHC -O2 -optc-O2 #-}
+{-# OPTIONS_GHC -O2 -optc-O3 -fno-cse #-}
 
 import Data.List
 import Control.Monad
@@ -20,9 +20,9 @@ squashLeft table = [squashLine l 4 | l <- table]
         where squashLine [] n = replicate n 0
               squashLine (0:xs) n = squashLine xs n
               squashLine [x] n = x: replicate (n-1) 0
-              squashLine (x:y:xs) n =
-                if x==y then (x+y): squashLine xs (n-1)
-                        else x: squashLine (y:xs) (n-1)
+              squashLine (x:y:xs) n
+                | x== y     = (x+y): squashLine xs (n-1)
+                | otherwise = x: squashLine (y:xs) (n-1)
 
 move :: Table -> Move -> Table
 move table m = case m of
@@ -54,12 +54,17 @@ genNext table = concat $ do
 emptyCount :: Table -> Int
 emptyCount = sum . map (length . filter (==0))
 
+twoBase :: Int -> Int
+twoBase pow = let Just i = lookup pow table in i
+    where table = (0, 0): [(2^i, i) | i <- [0..20]]
+
 -- how many columns and rows are monotonous
 monoCount :: Table -> Int
-monoCount table = (sum . map isMono) table + (sum . map isMono . transpose) table
-    where isMono l = if and (zipWith (<=) l (tail l)) ||
-                        and (zipWith (>=) l (tail l))
-                        then 1 else 0
+monoCount table = sum (map isMono table) + sum (map isMono (transpose table))
+    where isMono l = if and [a <= b | (a,b) <- pairs] || and [a >= b | (a,b) <- pairs]
+                        then (twoBase . maximum $ l) else 0
+            where pairs = zip l (tail l)
+
 
 totalValue :: Table -> Double
 totalValue table = sum [val i | l <- table, i <- l]
@@ -74,24 +79,36 @@ evaluate t = (fromIntegral . monoCount $ t) * 30.0
            + totalValue t * 1.0
 
 bestMove :: Int -> Table -> Maybe (Double, Move)
-bestMove deepth t = let ms = [(v, m) | m <- [LEFT .. DOWN]
-                             , let t' = move t m
-                             , let v = if deepth == 0 then evaluate t'
-                                                      else expectVal deepth t'
-                             , t' /= t && emptyCount t' > 0]
-                    in  if null ms then Nothing
-                                   else Just (maximumBy (comparing fst) ms)
+bestMove deepth t = let -- possible moves and corresponding table
+                        mts = [(t', m) | m <- [LEFT .. DOWN]
+                                       , let t' = move t m
+                                       , t' /= t]
+                    in case length mts of
+                           0 -> Nothing
+                           1 -> let (t', m) = head mts  -- only one, don't lookforward
+                                in  Just (evaluate t', m)
+                           _ -> let posib = [(expectVal deepth t', m) | (t', m) <- mts]
+                                in  Just (maximumBy (comparing fst) posib)
+
+estiDeepth :: Table -> Int
+estiDeepth t 
+        | ec >= 12 = 1
+        {-| ec >= 8 = 1-}
+        | ec >= 4 = 2
+        {-| ec >= 2 = 3-}
+        | otherwise = 3
+    where ec = emptyCount t
 
 expectVal :: Int -> Table -> Double
+expectVal 0 t = evaluate t
 expectVal deepth t =
         -- if too many empty block, do not look forwards
-        if emptyCount t >= 10
-            then evaluate t
+        let d = min (deepth-1) (estiDeepth t)
             -- expection of evaluation of next table
-            else sum $ do (p', t') <- ts
-                          case bestMove (deepth-1) t' of
-                              Just (v, _) -> return (p' * v)
-                              Nothing -> return (p' * evaluate t')
+        in  sum $ do (p', t') <- ts
+                     case bestMove d t' of
+                         Just (v, _) -> return (p' * v)
+                         Nothing -> return (p' * evaluate t')
     where ts = genNext t
 
 playForever :: Table -> IO Table
@@ -115,7 +132,7 @@ playForever t =
                                 drop (i+1) t
                     putStrLn $ "New " ++ show block ++ " at " ++ show (i+1,j+1)
                     printTable t'
-                    case bestMove 2 t' of  -- lookforward
+                    case bestMove (estiDeepth t') t' of  -- lookforward
                         Nothing -> do  -- no more moves, game over
                                     putStrLn "No moves. Game over."
                                     return t'
@@ -127,9 +144,9 @@ playForever t =
 
 main = do
         -- for submitting to hackerrank 2048 contest
-        {-table <- replicateM 4 readLnInts
-        let Just (_, m)  = bestMove 2 table [> lookforward X steps <]
-        print m-}
+        {-table <- replicateM 4 readLnInts-}
+        {-let Just (_, m)  = bestMove (estiDeepth table) table [> lookforward X steps <]-}
+        {-print m-}
 
         playForever (replicate 4 (replicate 4 0))
 
