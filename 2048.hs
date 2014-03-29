@@ -73,19 +73,19 @@ evaluate :: Table -> Double
 evaluate t = (fromIntegral . monoCount $ t) * 30.0
            + totalValue t * 1.0
 
-
 bestMove :: Int -> Table -> Maybe (Double, Move)
-bestMove deepth t = let ms = [(v, m) | m <- [LEFT, RIGHT, UP, DOWN]
+bestMove deepth t = let ms = [(v, m) | m <- [LEFT .. DOWN]
                              , let t' = move t m
-                             , let v = if deepth <= 1 then evaluate t'
+                             , let v = if deepth == 0 then evaluate t'
                                                       else expectVal deepth t'
-                             , emptyCount t' > 0]
-                    in  if null ms then Nothing else Just (maximum ms)
+                             , t' /= t && emptyCount t' > 0]
+                    in  if null ms then Nothing
+                                   else Just (maximumBy (comparing fst) ms)
 
 expectVal :: Int -> Table -> Double
 expectVal deepth t =
         -- if too many empty block, do not look forwards
-        if emptyCount t >= 4
+        if emptyCount t >= 10
             then evaluate t
             -- expection of evaluation of next table
             else sum $ do (p', t') <- ts
@@ -95,37 +95,42 @@ expectVal deepth t =
     where ts = genNext t
 
 playForever :: Table -> IO Table
-playForever t = case bestMove 3 t of -- lookforward X steps
-                    Nothing -> return t  -- no more moves, game over
-                    Just (_, m) ->
-                        let t' = move t m
-                            emptyPos = [(i,j) | i <- [0..3] , j <- [0..3]
-                                              , t' !! i !! j == 0]
-                        in do
-                            r1 <- randomRIO (0, length emptyPos - 1)
-                            r2 <- randomRIO (1, 100)
-                            let -- random select empty position
-                                (i,j) = emptyPos !! (r1 :: Int)
-                                -- random fill 2 or 4
-                                block = if 75 > (r2 :: Int) then 2 else 4
-                                l = t' !! i
-                                -- new table
-                                t'' = take i t' ++
-                                        [take j l ++ [block] ++ drop (j+1) l] ++
-                                        drop (i+1) t'
-                            -- show
-                            print m
-                            printTable t''
-                            -- play more
-                            playForever t''
+playForever t =
+        let emptyPos = [(i,j) | i <- [0..3] , j <- [0..3] , t !! i !! j == 0]
+        in  if null emptyPos
+                then do  -- game over
+                    putStrLn "No empty blocks. Game over."
+                    return t
+                else do
+                    r1 <- randomRIO (0, length emptyPos - 1)
+                    r2 <- randomRIO (1, 100)
+                    let -- random select empty position
+                        (i,j) = emptyPos !! (r1 :: Int)
+                        -- random fill 2 or 4
+                        block = if 75 > (r2 :: Int) then 2 else 4
+                        l = t !! i
+                        -- new table
+                        t' = take i t ++
+                                [take j l ++ [block] ++ drop (j+1) l] ++
+                                drop (i+1) t
+                    putStrLn $ "New " ++ show block ++ " at " ++ show (i+1,j+1)
+                    printTable t'
+                    case bestMove 2 t' of  -- lookforward
+                        Nothing -> do  -- no more moves, game over
+                                    putStrLn "No moves. Game over."
+                                    return t'
+                        Just (_, m) -> do
+                                    print m
+                                    let t'' = move t' m
+                                    printTable t''
+                                    playForever t''
 
 main = do
-        -- for submit to hackerrank 2048 contest
+        -- for submitting to hackerrank 2048 contest
         {-table <- replicateM 4 readLnInts
-        let Just (_, m)  = bestMove 3 table [> lookforward X steps <]
+        let Just (_, m)  = bestMove 2 table [> lookforward X steps <]
         print m-}
 
         playForever (replicate 4 (replicate 4 0))
 
-    where readLnInt = readLn :: IO Int
-          readLnInts = liftM (map (read::String->Int) . words) getLine
+    where readLnInts = liftM (map (read::String->Int) . words) getLine
