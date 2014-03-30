@@ -13,6 +13,8 @@ import Data.Time
 data Move = LEFT | RIGHT | UP | DOWN deriving (Eq, Show, Ord, Enum, Bounded)
 type Table = [[Int]]
 
+probOfFour = 0.25
+
 printTable :: Table -> IO ()
 printTable = putStrLn . (++"\n") 
            . intercalate "\n" 
@@ -47,13 +49,15 @@ genNext table = concat $ do
         j <- [0..3]
         guard (table !! i !! j == 0)
         let l = table !! i
-        return [(prob * 0.75, take i table ++
-                              [take j l ++ [2] ++ drop (j+1) l] ++
-                              drop (i+1) table),
-                (prob * 0.25, take i table ++
-                              [take j l ++ [4] ++ drop (j+1) l] ++
-                              drop (i+1) table)]
+        return [(prob * p2, take i table ++
+                            [take j l ++ [2] ++ drop (j+1) l] ++
+                            drop (i+1) table),
+                (prob * p4, take i table ++
+                            [take j l ++ [4] ++ drop (j+1) l] ++
+                            drop (i+1) table)]
     where prob = 1 / fromIntegral (emptyCount table)
+          p4 = probOfFour
+          p2 = 1 - probOfFour
 
 emptyCount :: Table -> Int
 emptyCount = sum . map (length . filter (==0))
@@ -109,23 +113,25 @@ bestMove depth t = do
                   else if v' < bd * (0.9 - fromIntegral depth * 0.1)  -- adoptable pruning threshold
                            {-then (trace (printf "pruning %d %f %f" depth bd v') v')-}
                            then return v'
-                           else do v'' <- expectVal depth t'
+                           else do let d = min depth (estiDepth t')
+                                   v'' <- expectVal d t'
                                    get >>= put . (max v'')  -- update bound
                                    return v''
 
 expectVal :: Int -> Table -> State Double Double
 expectVal depth t = do
-        let d = min (depth - 1) (estiDepth t)
-        res <- sequence [liftM ((,) p) $ bestMove d t' | (p, t') <- genNext t]  -- [(p, Maybe (v, m))]
+        res <- sequence [liftM ((,) p) $ bestMove (depth - 1) t'  -- [(p, Maybe (v, m))]
+                        | (p, t') <- genNext t]
         return . sum . map (\(p, r) -> maybe 0 ((*p) . fst) r) $ res  -- sum { p * v }
 
 estiDepth :: Table -> Int
 estiDepth t
-        | ec >= 10 = 1
-        {-| ec >= 8 = 1-}
+        | ec >= 12 = 1
+        {-| ec >= 8 = 2-}
         | ec >= 3 = 2
-        | ec >= 1 = 3
-        | otherwise = 4
+        | ec >= 2 = 3
+        | ec >= 1 = 4
+        | otherwise = 5
     where ec = emptyCount t
 
 playForever :: Table -> IO Table
@@ -137,11 +143,11 @@ playForever t =
                     return t
                 else do
                     r1 <- randomRIO (0, length emptyPos - 1)
-                    r2 <- randomRIO (1, 100)
+                    r2 <- randomRIO (0, 1) :: IO Double
                     let -- random select empty position
-                        (i,j) = emptyPos !! (r1 :: Int)
+                        (i,j) = emptyPos !! r1
                         -- random fill 2 or 4
-                        block = if 75 > (r2 :: Int) then 2 else 4
+                        block = if probOfFour < r2 then 2 else 4
                         l = t !! i
                         -- new table
                         t' = take i t ++
